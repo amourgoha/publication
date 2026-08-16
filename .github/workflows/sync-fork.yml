@@ -24,7 +24,7 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
 
-      - name: Fast-forward from the upstream repository
+      - name: Merge upstream changes into the fork
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -40,5 +40,7 @@ jobs:
           upstream_branch="$(jq -r '.parent.default_branch' <<<"${repository_metadata}")"
           git remote add upstream "${upstream_url}"
           git fetch upstream "${upstream_branch}"
-          git merge --ff-only "upstream/${upstream_branch}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git merge --no-ff --no-edit "upstream/${upstream_branch}"
           git push origin "${fork_branch}"
