@@ -131,7 +131,6 @@ ensure_commit_available() {
 
 before="${GITHUB_EVENT_BEFORE:-}"
 sync_all="${R2_SYNC_ALL:-false}"
-
 if [[ "$sync_all" == "true" || -z "$before" || "$before" =~ ^0+$ ]]; then
   sync_all_files
 else

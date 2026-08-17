@@ -3,7 +3,6 @@ name: Sync publication files to Cloudflare R2
 on:
   push:
     branches:
-      - master
   workflow_dispatch:
     inputs:
       sync_all:
@@ -26,6 +25,7 @@ env:
 jobs:
   sync-r2:
     name: Sync changed publication files to R2
+    if: github.event_name == 'workflow_dispatch' || github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     environment: env
     steps:
@@ -47,6 +47,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets['cloudflare-api-token'] || secrets.cloudflare_api_token }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || secrets.account_id || secrets.cloudflare_account_id }}
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
           R2_SYNC_ALL: ${{ github.event_name == 'workflow_dispatch' && inputs.sync_all || 'false' }}
         run: |
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "CLOUDFLARE_API_TOKEN secret is missing." >&2; exit 1; }
