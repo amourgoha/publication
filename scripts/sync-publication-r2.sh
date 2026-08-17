@@ -131,12 +131,6 @@ ensure_commit_available() {
 
 before="${GITHUB_EVENT_BEFORE:-}"
 sync_all="${R2_SYNC_ALL:-false}"
-
-if [[ "${GITHUB_EVENT_NAME:-}" == "push" && -z "$before" ]]; then
-  echo "Push event is missing its base commit SHA; refusing to fall back to a full R2 upload." >&2
-  exit 1
-fi
-
 if [[ "$sync_all" == "true" || -z "$before" || "$before" =~ ^0+$ ]]; then
   sync_all_files
 else
