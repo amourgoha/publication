@@ -2,11 +2,12 @@ name: Sync fork with upstream
 
 on:
   schedule:
-    # Run once a week, Sunday at 03:00 UTC.
-    - cron: "0 3 * * 0"
+    # Check the upstream repository every day at 03:00 UTC.
+    - cron: "0 3 * * *"
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
 
 concurrency:
@@ -25,6 +26,7 @@ jobs:
           fetch-depth: 0
 
       - name: Merge upstream changes into the fork
+        id: merge-upstream
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -42,5 +44,23 @@ jobs:
           git fetch upstream "${upstream_branch}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          before_sha="$(git rev-parse HEAD)"
           git merge --no-ff --no-edit "upstream/${upstream_branch}"
+          after_sha="$(git rev-parse HEAD)"
+
+          if [ "${before_sha}" = "${after_sha}" ]; then
+            echo "The fork is already up to date with upstream."
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
           git push origin "${fork_branch}"
+          echo "changed=true" >> "${GITHUB_OUTPUT}"
+
+      # A push authenticated with GITHUB_TOKEN does not trigger another
+      # workflow, so explicitly start the R2 sync after a successful merge.
+      - name: Start R2 sync for the merged content
+        if: steps.merge-upstream.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run sync-r2.yml --repo "${GITHUB_REPOSITORY}" --ref "${{ github.event.repository.default_branch }}" -f sync_all=true
