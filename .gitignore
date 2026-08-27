@@ -29,3 +29,6 @@ ny_audios.json
 ./*/*/*.mobi
 *_unzip/
 */*/*epub_unzip/
+
+# Local task notes are intentionally not part of the repository.
+/task.md
