@@ -1,0 +1,123 @@
+name: Sync publication branches and R2
+
+on:
+  # A publication update is developed on 06_lancet. Merge it into master
+  # before syncing the resulting master tree to R2.
+  push:
+    branches:
+      - 06_lancet
+  # Check the fork's parent repository once a day for upstream changes.
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      sync_all:
+        description: Re-upload every publication file and image
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publication-sync-master
+  cancel-in-progress: false
+
+env:
+  R2_BUCKET_NAME: ${{ vars.R2_BUCKET_NAME || 'nice69' }}
+  R2_OBJECT_PREFIX: publication
+
+jobs:
+  sync:
+    name: Update master and sync R2
+    runs-on: ubuntu-latest
+    environment: env
+
+    steps:
+      - name: Check out master history
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          # Keep commit metadata for the incremental diff while lazy-fetching
+          # publication blobs when the sync script materializes them.
+          fetch-depth: 0
+          filter: blob:none
+          sparse-checkout: |
+            .github
+            scripts
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Update master
+        id: update-master
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_SYNC_ALL: ${{ github.event_name == 'workflow_dispatch' && inputs.sync_all || false }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --no-tags origin master 06_lancet
+
+          before_sha="$(git rev-parse master)"
+
+          if [[ "${EVENT_NAME}" == "push" ]]; then
+            echo "Merging origin/06_lancet into master."
+            git merge --no-ff --no-edit origin/06_lancet
+          elif [[ "${EVENT_NAME}" == "schedule" || "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            repository_metadata="$(gh api "repos/${GITHUB_REPOSITORY}")"
+            upstream_url="$(jq -r '.parent.clone_url // empty' <<<"${repository_metadata}")"
+
+            if [[ -z "${upstream_url}" ]]; then
+              echo "${GITHUB_REPOSITORY} is not a GitHub fork, so there is no upstream to sync."
+              after_sha="${before_sha}"
+              echo "before_sha=${before_sha}" >> "${GITHUB_OUTPUT}"
+              echo "after_sha=${after_sha}" >> "${GITHUB_OUTPUT}"
+              echo "changed=false" >> "${GITHUB_OUTPUT}"
+              echo "sync_all=${MANUAL_SYNC_ALL}" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+
+            upstream_branch="$(jq -r '.parent.default_branch' <<<"${repository_metadata}")"
+            git remote add upstream "${upstream_url}"
+            git fetch --no-tags upstream "${upstream_branch}"
+            echo "Merging upstream/${upstream_branch} into master."
+            git merge --no-ff --no-edit "upstream/${upstream_branch}"
+          fi
+
+          after_sha="$(git rev-parse HEAD)"
+          changed=false
+          if [[ "${before_sha}" != "${after_sha}" ]]; then
+            changed=true
+            git push origin "HEAD:master"
+          fi
+
+          sync_all="${MANUAL_SYNC_ALL}"
+          if [[ "${before_sha}" != "${after_sha}" ]] && ! git diff --quiet "${before_sha}" "${after_sha}" -- \
+            .github/workflows/publication-sync.yml scripts/sync-publication-r2.sh; then
+            sync_all=true
+          fi
+
+          echo "before_sha=${before_sha}" >> "${GITHUB_OUTPUT}"
+          echo "after_sha=${after_sha}" >> "${GITHUB_OUTPUT}"
+          echo "changed=${changed}" >> "${GITHUB_OUTPUT}"
+          echo "sync_all=${sync_all}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload publication files and remove deleted files
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets['cloudflare-api-token'] || secrets.cloudflare_api_token }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || secrets.account_id || secrets.cloudflare_account_id }}
+          GITHUB_SHA: ${{ steps.update-master.outputs.after_sha }}
+          GITHUB_EVENT_BEFORE: ${{ steps.update-master.outputs.before_sha }}
+          R2_SYNC_ALL: ${{ steps.update-master.outputs.sync_all }}
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN}" || { echo "CLOUDFLARE_API_TOKEN secret is missing." >&2; exit 1; }
+          test -n "${CLOUDFLARE_ACCOUNT_ID}" || { echo "CLOUDFLARE_ACCOUNT_ID secret is missing." >&2; exit 1; }
+          bash scripts/sync-publication-r2.sh
