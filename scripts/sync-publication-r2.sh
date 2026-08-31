@@ -4,7 +4,7 @@ set -euo pipefail
 
 : "${R2_BUCKET_NAME:?R2_BUCKET_NAME is required}"
 : "${R2_OBJECT_PREFIX:=publication}"
-: "${GITHUB_SHA:?GITHUB_SHA is required}"
+: "${PUBLICATION_AFTER_SHA:?PUBLICATION_AFTER_SHA is required}"
 
 if [[ -z "${R2_OBJECT_PREFIX}" ]]; then
   echo "R2_OBJECT_PREFIX must not be empty." >&2
@@ -86,10 +86,10 @@ sync_all_files() {
 
   while IFS= read -r -d '' path; do
     if is_syncable_path "$path"; then
-      local_file="$(materialize_file "$path" "$GITHUB_SHA")"
+      local_file="$(materialize_file "$path" "$PUBLICATION_AFTER_SHA")"
       upload_file "$path" "$local_file"
     fi
-  done < <(git ls-tree -r --name-only -z "$GITHUB_SHA")
+  done < <(git ls-tree -r --name-only -z "$PUBLICATION_AFTER_SHA")
 }
 
 sync_changed_files() {
@@ -129,7 +129,7 @@ ensure_commit_available() {
   git fetch --no-tags --filter=blob:none origin "$ref"
 }
 
-before="${GITHUB_EVENT_BEFORE:-}"
+before="${PUBLICATION_BEFORE_SHA:-}"
 sync_all="${R2_SYNC_ALL:-false}"
 
 if [[ "${GITHUB_EVENT_NAME:-}" == "push" && -z "$before" ]]; then
@@ -141,5 +141,5 @@ if [[ "$sync_all" == "true" || -z "$before" || "$before" =~ ^0+$ ]]; then
   sync_all_files
 else
   ensure_commit_available "$before"
-  sync_changed_files "$before" "$GITHUB_SHA"
+  sync_changed_files "$before" "$PUBLICATION_AFTER_SHA"
 fi
